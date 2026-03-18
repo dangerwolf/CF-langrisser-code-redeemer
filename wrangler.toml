@@ -1,0 +1,16 @@
+name = "CF-langrisser-code-redeemer"
+main = "src/index.js"
+compatibility_date = "2026-03-18"
+
+# 定时任务：每 1 小时执行一次
+[triggers]
+crons = ["0 * * * *"]
+
+# 绑定无头浏览器组件 (不是敏感信息)
+[browser]
+binding = "MYBROWSER"
+
+# 绑定 KV 数据库 (此 ID 仅为资源标识，必须写在这里，即使开源泄漏也毫无风险)
+[[kv_namespaces]]
+binding = "CODE_HISTORY"
+id = "这里填入你通过命令获取到的_KV_NAMESPACE_ID"
