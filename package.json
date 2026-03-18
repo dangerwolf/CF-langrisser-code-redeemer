@@ -1,0 +1,16 @@
+{
+  "name": "langrisser-code-redeemer",
+  "version": "1.0.0",
+  "description": "Langrisser auto code redeemer for Cloudflare Workers",
+  "main": "src/index.js",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev --remote"
+  },
+  "dependencies": {
+    "@cloudflare/puppeteer": "^0.0.11"
+  },
+  "devDependencies": {
+    "wrangler": "^3.0.0"
+  }
+}
