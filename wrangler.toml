@@ -2,6 +2,9 @@ name = "langrisser-code-redeemer"
 main = "src/index.js"
 compatibility_date = "2026-03-18"
 
+# 👇 添加这一行，开启 Node.js 模块兼容支持，解决 node:stream 报错 👇
+compatibility_flags = ["nodejs_compat"]
+
 # 定时任务：每 1 小时执行一次
 [triggers]
 crons = ["0 * * * *"]
