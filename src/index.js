@@ -1,9 +1,7 @@
 import puppeteer from '@cloudflare/puppeteer';
 
-// 辅助函数：休眠防并发
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-// 辅助函数：发送 Telegram 通知
 async function sendTelegramMessage(token, chatId, text) {
   if (!token || !chatId) return;
   const url = `https://api.telegram.org/bot${token}/sendMessage`;
@@ -11,58 +9,34 @@ async function sendTelegramMessage(token, chatId, text) {
     await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        chat_id: chatId,
-        text: text,
-        parse_mode: 'Markdown'
-      })
+      body: JSON.stringify({ chat_id: chatId, text: text, parse_mode: 'Markdown' })
     });
-    console.log("Telegram 通知发送成功！");
-  } catch (err) {
-    console.error("Telegram 通知发送失败:", err);
-  }
+  } catch (err) { console.error("TG推送失败:", err); }
 }
 
-// 辅助函数：发送 Bark 通知
 async function sendBarkMessage(deviceKeysStr, text) {
   if (!deviceKeysStr) return;
-  
-  // 将环境变量中的字符串按逗号分割成数组，并去除空格
   const deviceKeys = deviceKeysStr.split(',').map(k => k.trim()).filter(k => k.length > 0);
-  if (deviceKeys.length === 0) return;
-
   try {
     await fetch("https://api.day.app/push", {
       method: 'POST',
       headers: { 'Content-Type': 'application/json; charset=utf-8' },
-      body: JSON.stringify({
-        title: "兑换码自动兑换",
-        body: text,
-        sound: "minuet",
-        group: "梦幻模拟战手游",
-        device_keys: deviceKeys // 传入从环境变量解析出的数组
-      })
+      body: JSON.stringify({ title: "兑换码助手", body: text, sound: "minuet", device_keys: deviceKeys })
     });
-    console.log("Bark 通知发送成功！");
-  } catch (err) {
-    console.error("Bark 通知发送失败:", err);
-  }
+  } catch (err) { console.error("Bark推送失败:", err); }
 }
 
 export default {
-  // 手动测试入口
   async fetch(request, env, ctx) {
     ctx.waitUntil(this.mainTask(env));
-    return new Response("抓取与兑换任务已在后台启动，请查看 Cloudflare 日志！", { status: 200 });
+    return new Response("任务已手动触发，请观察日志输出。", { status: 200 });
   },
 
-  // Cron 定时任务入口
   async scheduled(event, env, ctx) {
     await this.mainTask(env);
   },
 
   async mainTask(env) {
-    // 1. 角色列表配置
     const roles = [
       '1689884746462003279', '1689886064172990864', '1689883572086505877',
       '3378734910823596534', '3378737564458418452', '3378738710698527412',
@@ -71,62 +45,81 @@ export default {
       '1689897753946882073'
     ];
 
-    console.log("任务开始：准备抓取 B站 Wiki 兑换码...");
     let fetchedCodes = [];
     let browser;
 
-    // 2. 无头浏览器抓取环节
     try {
       browser = await puppeteer.launch(env.MYBROWSER);
       const page = await browser.newPage();
-      await page.goto('https://wiki.biligame.com/langrisser/兑换码', { waitUntil: 'domcontentloaded' });
-      await page.waitForSelector('.cdkey-tr', { timeout: 30000 });
 
-      fetchedCodes = await page.evaluate(() => {
-        const codeArray = [];
-        const rows = document.querySelectorAll('.cdkey-tr');
-        for (const row of rows) {
-          try {
-            const statusEl = row.querySelector('.cdkey-acti');
-            if (statusEl && statusEl.innerText.trim() === '领取') {
-              const codeEl = row.querySelector('.bikited-copy');
-              if (codeEl) codeArray.push(codeEl.innerText.trim());
-            }
-          } catch (e) { continue; }
-        }
-        return codeArray;
+      // 【关键优化 1】：设置伪装 User-Agent，防止 B 站拦截无头浏览器
+      await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
+
+      // 访问页面
+      console.log("正在访问 Wiki 页面...");
+      await page.goto('https://wiki.biligame.com/langrisser/兑换码', { 
+        waitUntil: 'networkidle2', // 等待网络空闲
+        timeout: 60000 
       });
-      console.log(`网页提取完成，找到 ${fetchedCodes.length} 个兑换码。`);
+
+      // 【关键优化 2】：不仅等待选择器，还要额外休眠几秒确保 Wiki 脚本执行完毕
+      console.log("等待兑换码组件加载...");
+      try {
+        await page.waitForSelector('.cdkey-tr', { timeout: 20000 });
+        await sleep(3000); // 额外给 3 秒缓冲区
+      } catch (e) {
+        console.error("未发现 .cdkey-tr 元素，可能是 Wiki 结构变动或加载极慢。");
+      }
+
+      // 【关键优化 3】：增强的提取脚本
+      fetchedCodes = await page.evaluate(() => {
+        const results = [];
+        const rows = document.querySelectorAll('.cdkey-tr');
+        
+        rows.forEach(row => {
+          const statusBtn = row.querySelector('.cdkey-acti');
+          // 这里的文本判断增加“包含”逻辑，防止有隐形字符
+          if (statusBtn && statusBtn.innerText.includes('领取')) {
+            const codeEl = row.querySelector('.bikited-copy');
+            if (codeEl) {
+              // 优先取 innerText，如果为空则尝试取 data-code 属性（Wiki 常用套路）
+              let codeValue = codeEl.innerText.trim();
+              if (!codeValue) {
+                codeValue = codeEl.getAttribute('data-clipboard-text') || codeEl.getAttribute('data-code');
+              }
+              if (codeValue) results.push(codeValue);
+            }
+          }
+        });
+        return results;
+      });
+
+      console.log(`[抓取结果] 找到 ${fetchedCodes.length} 个可用码:`, fetchedCodes);
+
     } catch (err) {
-      console.error("Puppeteer 抓取异常:", err);
-      return; 
+      console.error("浏览器运行错误:", err.message);
+      return;
     } finally {
-      if (browser) await browser.close(); 
+      if (browser) await browser.close();
     }
 
+    // 后续的比对和兑换逻辑保持不变...
     if (fetchedCodes.length === 0) return;
 
-    // 3. 读取 KV 历史记录
     let usedCodesSet = new Set();
     try {
       const historyStr = await env.CODE_HISTORY.get("used_codes");
       if (historyStr) usedCodesSet = new Set(JSON.parse(historyStr));
     } catch (err) {}
 
-    // 4. 找出新码
     const fresh_codes = fetchedCodes.filter(code => !usedCodesSet.has(code));
-    if (fresh_codes.length === 0) {
-      console.log("没有检测到新码，任务结束。");
-      return;
-    }
+    if (fresh_codes.length === 0) return;
 
-    // 5. 遍历新码并进行 API 兑换
     let newly_used = new Set();
     let notify_msgs = [];
 
     for (const code of fresh_codes) {
-      let code_success = false;
-
+      console.log(`>>> 处理新码: ${code}`);
       for (const role of roles) {
         const serverId = role.startsWith('33787') ? "6001" : "3001";
         const params = new URLSearchParams();
@@ -144,42 +137,25 @@ export default {
             headers: { "Content-Type": "application/x-www-form-urlencoded; charset=utf-8" },
             body: params.toString()
           });
-
-          if (response.status === 200) {
-            const data = await response.json();
-            if (data.info === 115) { // 115 代表成功
-              console.log(`[成功] ${role} 兑换 ${code}`);
-              notify_msgs.push(`🎁 成功兑换码：${code} | 角色ID：${role}`);
-              code_success = true;
-            } else {
-              console.log(`[反馈] ${role} 兑换 ${code} => info: ${data.info}`);
-            }
+          const data = await response.json();
+          if (data.info === 115) {
+            notify_msgs.push(`🎁 成功：${code} (角色:${role})`);
           }
-        } catch (error) {
-          console.error(`[异常] ${role} 请求出错:`, error.message);
-        }
+        } catch (e) {}
         await sleep(1000); 
       }
-      // 不论成败均记录，防止未来 1 小时重复发起请求
       newly_used.add(code);
     }
 
-    // 6. 保存状态并发送多渠道通知
     if (newly_used.size > 0) {
-      newly_used.forEach(code => usedCodesSet.add(code));
+      newly_used.forEach(c => usedCodesSet.add(c));
       await env.CODE_HISTORY.put("used_codes", JSON.stringify(Array.from(usedCodesSet)));
-      
       if (notify_msgs.length > 0) {
-        const tgMessage = "*🎮 Langrisser 自动兑换通知*\n\n" + notify_msgs.join("\n\n");
-        const barkMessage = notify_msgs.join("\n"); // Bark 不支持复杂 Markdown，用纯文本换行
-        
-        // 并行触发两种推送
+        const msg = "*🎮 梦幻模拟战兑换报告*\n\n" + notify_msgs.join("\n");
         await Promise.all([
-          sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, env.TELEGRAM_CHAT_ID, tgMessage),
-          sendBarkMessage(env.BARK_DEVICE_KEYS, barkMessage)
+          sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, env.TELEGRAM_CHAT_ID, msg),
+          sendBarkMessage(env.BARK_DEVICE_KEYS, msg)
         ]);
-      } else {
-        console.log("所有尝试兑换的码均无效或已兑换过，无成功记录，不发送通知。");
       }
     }
   }
