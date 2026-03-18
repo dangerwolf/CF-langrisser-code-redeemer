@@ -13,4 +13,4 @@ binding = "MYBROWSER"
 # 绑定 KV 数据库 (此 ID 仅为资源标识，必须写在这里，即使开源泄漏也毫无风险)
 [[kv_namespaces]]
 binding = "CODE_HISTORY"
-id = "这里填入你通过命令获取到的_KV_NAMESPACE_ID"
+id = "5d78ba187d854e60b20971c8455b5d6b"
