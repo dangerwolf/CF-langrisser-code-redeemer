@@ -1,4 +1,4 @@
-name = "CF-langrisser-code-redeemer"
+name = "langrisser-code-redeemer"
 main = "src/index.js"
 compatibility_date = "2026-03-18"
 
